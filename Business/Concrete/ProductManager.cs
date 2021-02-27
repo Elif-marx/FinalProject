@@ -3,6 +3,7 @@ using Business.Constants;
 using Business.ValidationRules.FluentValidation;
 using Core.Aspects.Autofac.Validation;
 using Core.CrossCuttingConcerns.Validation;
+using Core.Utilities.Business;
 using Core.Utilities.Results;
 using DataAccess.Abstract;
 using Entities.Concrete;
@@ -10,6 +11,7 @@ using Entities.DTOs;
 using FluentValidation;
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text;
 
 namespace Business.Concrete
@@ -17,27 +19,60 @@ namespace Business.Concrete
     public class ProductManager : IProductService
     {
         IProductDal _ProductDal;
+        ICategoryService _categoryService;
 
-        public ProductManager(IProductDal productDal)
+        public ProductManager(IProductDal productDal, ICategoryService categoryService)
         {
             _ProductDal = productDal;
+            _categoryService = categoryService;
         }
         [ValidationAspect(typeof(ProductValidator))]
-        public IResult Add(Product product)//business codes validation
+        public IResult Add(Product product)
         {
+            //Aynı isimde ürün eklenemez
+            //Eğer mevcut kategori sayısı 15'i geçtiyse sisteme yeni ürün eklenemez.
             // ValidationTool.Validate(new ProductValidator(), product);
+
+            IResult result = BusinessRules.Run(CheckIfProductNameExists(product.ProductName),
+                CheckIfProductCountOfCategoryCorrect(product.CategoryId), CheckIfCategoryLimitExceded());
+
+            if (result!=null)
+            {
+                return result;
+            }
             _ProductDal.Add(product);
             return new SuccessResult(Messages.ProductAdded);
         }
 
-        public IDataResult<List<Product>> Getall()
+        private IResult CheckIfCategoryLimitExceded()
         {
-            if (DateTime.Now.Hour==22)
+            var result = _categoryService.GetAll();
+            if (result.Data.Count>15)
             {
-                return new ErrorDataResult<List<Product>>(Messages.MaintenanceTime);
+                return new ErrorResult(Messages.CategoryLimitExceded);
             }
-            return new DataResult<List<Product>>(_ProductDal.GetAll(),true,Messages.ProductsListed);
-        }                                                                  //"ürünler listelendi"
+            return new SuccessResult();
+        }
+
+        private IResult CheckIfProductCountOfCategoryCorrect(int categoryId)
+        {
+            var result = _ProductDal.GetAll(p => p.CategoryId == categoryId).Count;
+            if (result>=15)
+            {
+                return new ErrorResult(Messages.ProductCountOfCategoryError);
+            }
+            return new SuccessResult();
+        }
+
+        private IResult CheckIfProductNameExists(string productName)
+        {
+            var result = _ProductDal.GetAll(p => p.ProductName == productName).Any();
+            if (result)
+            {
+                return new ErrorResult(Messages.ProductNameAlreadyExists);
+            }
+            return new SuccessResult();
+        }
 
         public IDataResult<List<Product>> GetAllByCategoryId(int id)
         {
@@ -61,6 +96,25 @@ namespace Business.Concrete
             //    return new ErrorDataResult<List<ProductDetailDto>>(Messages.MaintenanceTime);
             //}
             return new SuccessDataResult<List<ProductDetailDto>> (_ProductDal.GetProductDetails());
+        }
+        [ValidationAspect(typeof(ProductValidator))]
+        public IResult Update(Product product)
+        {
+            var result = _ProductDal.GetAll(p => p.CategoryId == product.CategoryId).Count;
+            if (result>= 15)
+            {
+                return new ErrorResult(Messages.ProductCountOfCategoryError);
+            }
+            throw new NotImplementedException();
+        }
+
+        public IDataResult<List<Product>> GetAll()
+        {
+            if (DateTime.Now.Hour == 22)
+            {
+                return new ErrorDataResult<List<Product>>(Messages.MaintenanceTime);
+            }
+            return new DataResult<List<Product>>(_ProductDal.GetAll(), true, Messages.ProductsListed);
         }
     }
 }
